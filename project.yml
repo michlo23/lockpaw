@@ -57,6 +57,8 @@ targets:
           PRODUCT_BUNDLE_DISPLAY_NAME: Lockpaw Debug
         Release:
           PRODUCT_BUNDLE_IDENTIFIER: com.eriknielsen.lockpaw
+          # Fork build: a distinct name in Privacy & Security next to an upstream install.
+          PRODUCT_BUNDLE_DISPLAY_NAME: Lockpaw Fork
     dependencies:
       - package: Sparkle
       - target: LockpawCLI
