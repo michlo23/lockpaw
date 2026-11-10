@@ -32,6 +32,10 @@ enum Constants {
     /// Off by default — Lockpaw stays locked.
     static let unlockWithMacKey = "unlockWithMac"
 
+    /// UserDefaults key: when an agent finishes during a Lockpaw lock, lock macOS, take
+    /// Lockpaw's cover down behind it and put the Mac to sleep. Off by default.
+    static let sleepWhenAgentFinishesKey = "sleepWhenAgentFinishes"
+
     enum Timing {
         static let inputBlockerDelayNs: UInt64 = 50_000_000           // 50ms
         static let overlayFadeIn: TimeInterval = 0.3                  // seconds; cover fades in on lock
@@ -43,6 +47,7 @@ enum Constants {
         static let urlSchemeDebounce: TimeInterval = 0.1              // seconds
         static let userActivityRefreshInterval: TimeInterval = 30     // seconds; defeats screensaver idle timer while locked
         static let lidPowerCheckInterval: TimeInterval = 30           // seconds; battery/thermal re-check while lid-closed mode holds sleep
+        static let sleepAfterFinishDelayNs: UInt64 = 10_000_000_000  // 10s; lets the notification and relay go out, and a second agent's ping land, before the Mac sleeps
         static let systemLockConfirmDelayNs: UInt64 = 1_000_000_000   // 1s; re-check the window server if screenIsLocked raced it
         static let relayTimeout: TimeInterval = 5                     // seconds; a ping that can't be delivered by then is stale
         static let relayThrottleWindow: TimeInterval = 30             // seconds; one relay per session per window unless the kind changes

@@ -14,4 +14,20 @@ final class InputBlockPolicyTests: XCTestCase {
             XCTAssertFalse(InputBlockPolicy.shouldStartDeferredBlocking(state: state), "\(state)")
         }
     }
+
+    func testOnePressArrivingTwiceTogglesOnce() {
+        let t = Date()
+        XCTAssertTrue(InputBlockPolicy.hotkeyPressToggles(now: t, lastPress: nil))
+        XCTAssertFalse(InputBlockPolicy.hotkeyPressToggles(now: t.addingTimeInterval(0.05), lastPress: t))
+        XCTAssertTrue(InputBlockPolicy.hotkeyPressToggles(now: t.addingTimeInterval(0.8), lastPress: t))
+    }
+
+    func testSleepsOnlyWhenAFinishedAgentPingsALockedScreenWithTheSettingOn() {
+        XCTAssertTrue(InputBlockPolicy.sleepsAfterPing(kind: .finished, state: .locked, settingEnabled: true))
+        XCTAssertFalse(InputBlockPolicy.sleepsAfterPing(kind: .finished, state: .locked, settingEnabled: false))
+        XCTAssertFalse(InputBlockPolicy.sleepsAfterPing(kind: .finished, state: .unlocked, settingEnabled: true))
+        for kind in [AgentPing.Kind.permission, .needsInput, .failed, .rateLimited, .attention] {
+            XCTAssertFalse(InputBlockPolicy.sleepsAfterPing(kind: kind, state: .locked, settingEnabled: true), "\(kind)")
+        }
+    }
 }

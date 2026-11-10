@@ -6,6 +6,7 @@ struct AgentSettingsPane: View {
     @AppStorage(GlowIntensity.storageKey) private var glowIntensity = GlowIntensity.defaultValue.rawValue
     @AppStorage(Constants.agentPingSoundKey) private var pingSound = false
     @AppStorage(Constants.lockScreenShowsProjectsKey) private var showsProjects = false
+    @AppStorage(Constants.sleepWhenAgentFinishesKey) private var sleepWhenFinished = false
 
     @State private var statuses: [String: AgentConnection.Status] = [:]
     @State private var presenceConfigured = false
@@ -86,6 +87,10 @@ struct AgentSettingsPane: View {
 
                 Toggle(isOn: $showsProjects) {
                     SettingLabel("Show project names on the lock screen", detail: "\u{201C}Claude Code \u{00B7} web-app\u{201D} instead of \u{201C}Claude Code\u{201D}.")
+                }
+
+                Toggle(isOn: $sleepWhenFinished) {
+                    SettingLabel("Sleep when an agent finishes", detail: "While locked: locks macOS, closes the cover and puts the Mac to sleep.")
                 }
 
                 LabeledContent("Try it") {

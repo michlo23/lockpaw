@@ -63,6 +63,8 @@ class LockController: ObservableObject {
     private var accessibilityCheckTimer: Timer?
     private var errorClearTask: Task<Void, Never>?
     private var toggleObserver: Any?
+    private var lastHotkeyPress: Date?
+    private var sleepAfterFinishTask: Task<Void, Never>?
     private var pingObserver: Any?
     /// `lockpaw://lock|unlock|unlock-password`. Here, not in MenuBarView: SwiftUI builds the
     /// MenuBarExtra content lazily, so observers there didn't exist until the menu had been
@@ -102,6 +104,9 @@ class LockController: ObservableObject {
             guard let self else { return }
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                let now = Date()
+                defer { self.lastHotkeyPress = now }
+                guard InputBlockPolicy.hotkeyPressToggles(now: now, lastPress: self.lastHotkeyPress) else { return }
                 if self.state == .unlocked {
                     self.lock()
                 } else if self.state == .locked {
@@ -232,6 +237,8 @@ class LockController: ObservableObject {
 
     func lock() {
         guard transitionTo(.locking) else { return }
+        sleepAfterFinishTask?.cancel() // a sleep scheduled by the previous lock is stale
+        sleepAfterFinishTask = nil
         SupportAskController.shared.lockStarted()
         guard AccessibilityChecker.isEnabled else {
             AccessibilityChecker.promptIfNeeded()
@@ -426,6 +433,34 @@ class LockController: ObservableObject {
         if decision.shouldNotify {
             AgentNotifier.shared.notify(body: ping.summary() + ".", withSound: decision.withSound)
             WebhookRelayController.shared.relay(ping)
+        }
+        if InputBlockPolicy.sleepsAfterPing(
+            kind: ping.kind, state: state,
+            settingEnabled: UserDefaults.standard.bool(forKey: Constants.sleepWhenAgentFinishesKey)
+        ), sleepAfterFinishTask == nil {
+            scheduleSleepAfterFinish()
+        }
+    }
+
+    /// Lock macOS first, and only once the window server confirms it take Lockpaw's cover
+    /// down (its sleep assertion goes with it), then sleep. If macOS didn't lock, Lockpaw
+    /// stays up — the Mac is never left open — and is asked to sleep anyway.
+    private func scheduleSleepAfterFinish() {
+        logger.notice("Agent finished — locking macOS and sleeping in a moment (setting on)")
+        sleepAfterFinishTask = Task { @MainActor [weak self] in
+            defer { self?.sleepAfterFinishTask = nil }
+            try? await Task.sleep(nanoseconds: Constants.Timing.sleepAfterFinishDelayNs)
+            guard let self, !Task.isCancelled, self.state == .locked else { return }
+            SystemSession.lockScreen()
+            try? await Task.sleep(nanoseconds: Constants.Timing.systemLockConfirmDelayNs)
+            guard self.state == .locked else { return }
+            if SystemSession.isScreenLocked {
+                self.unlock()
+            } else {
+                logger.error("macOS did not lock — keeping Lockpaw up and sleeping anyway")
+            }
+            try? await Task.sleep(nanoseconds: 1_500_000_000) // let the overlay and sleep assertion go
+            SystemSession.sleepNow()
         }
     }
 

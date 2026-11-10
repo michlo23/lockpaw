@@ -17,4 +17,21 @@ enum InputBlockPolicy {
     static func shouldStartDeferredBlocking(state: LockState) -> Bool {
         state == .locked
     }
+
+    /// The hotkey can arrive twice for one press — the event tap and the Carbon hotkey
+    /// (registered for when Secure Input blinds the tap) — and Carbon repeats while the key
+    /// is held. A press only toggles if the previous one was more than `window` ago; every
+    /// press, counted or not, restarts that window, so a held key toggles once.
+    static let hotkeyPressWindow: TimeInterval = 0.5
+
+    static func hotkeyPressToggles(now: Date, lastPress: Date?, window: TimeInterval = hotkeyPressWindow) -> Bool {
+        guard let lastPress else { return true }
+        return now.timeIntervalSince(lastPress) > window
+    }
+
+    /// "Sleep when an agent finishes": only a finished agent, only while Lockpaw holds the
+    /// screen, only with the setting on. A waiting or failed agent needs the user instead.
+    static func sleepsAfterPing(kind: AgentPing.Kind, state: LockState, settingEnabled: Bool) -> Bool {
+        settingEnabled && state == .locked && kind == .finished
+    }
 }

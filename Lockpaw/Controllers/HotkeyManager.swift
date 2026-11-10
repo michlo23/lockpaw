@@ -14,8 +14,43 @@ class HotkeyManager {
     private var tapThread: Thread?
     private var tapRunLoop: CFRunLoop?
     private(set) var isRegistered = false
+    private var carbonHotKey: EventHotKeyRef?
+    private var carbonHandler: EventHandlerRef?
+
+    /// The tap goes blind while any process holds Secure Input — and macOS's loginwindow
+    /// can keep it on long after the lock screen or a password AutoFill closed, killing the
+    /// hotkey until the next logout. A Carbon hotkey is delivered by the window server even
+    /// then, so it is registered too. When both fire, LockController's
+    /// `InputBlockPolicy.hotkeyPressToggles` collapses them into one toggle.
+    private func registerCarbonHotkey() {
+        guard carbonHotKey == nil else { return }
+        if carbonHandler == nil {
+            var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+            InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .toggleLockpaw, object: nil)
+                }
+                return noErr
+            }, 1, &spec, nil, &carbonHandler)
+        }
+        let id = EventHotKeyID(signature: OSType(0x4C4B_5057), id: 1) // "LKPW"
+        let status = RegisterEventHotKey(
+            UInt32(HotkeyConfig.keyCode), UInt32(HotkeyConfig.modifiers), id,
+            GetApplicationEventTarget(), 0, &carbonHotKey
+        )
+        if status != noErr {
+            carbonHotKey = nil
+            logger.error("RegisterEventHotKey failed: \(status, privacy: .public)")
+        }
+    }
+
+    private func unregisterCarbonHotkey() {
+        if let ref = carbonHotKey { UnregisterEventHotKey(ref) }
+        carbonHotKey = nil
+    }
 
     func registerHotkey() {
+        registerCarbonHotkey()
         if isRegistered {
             guard !AXIsProcessTrusted() else { return }
             // Accessibility was revoked (dead tap) — tear down and re-register
@@ -117,6 +152,7 @@ class HotkeyManager {
     }
 
     func unregisterHotkey() {
+        unregisterCarbonHotkey()
         guard isRegistered else { return }
 
         if let tap = eventTap {
