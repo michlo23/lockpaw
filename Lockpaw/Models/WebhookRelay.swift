@@ -40,6 +40,9 @@ enum WebhookRelay {
         case .permission, .needsInput: return "waiting"
         case .rateLimited, .failed: return "error"
         case .attention: return "attention"
+        // Never relayed (not news); named only so the switch stays total.
+        case .working: return "working"
+        case .ended: return "ended"
         }
     }
 

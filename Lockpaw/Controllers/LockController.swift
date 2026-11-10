@@ -65,6 +65,9 @@ class LockController: ObservableObject {
     private var toggleObserver: Any?
     private var lastHotkeyPress: Date?
     private var sleepAfterFinishTask: Task<Void, Never>?
+    /// Agents mid-turn, tracked while unlocked too, seeded into the rows at each lock.
+    private var workingSessions = WorkingSessions()
+    private var workingLivenessTimer: Timer?
     private var pingObserver: Any?
     /// `lockpaw://lock|unlock|unlock-password`. Here, not in MenuBarView: SwiftUI builds the
     /// MenuBarExtra content lazily, so observers there didn't exist until the menu had been
@@ -216,10 +219,17 @@ class LockController: ObservableObject {
                 self?.handlePing(ping)
             }
         }
+
+        let liveness = Timer(timeInterval: Constants.Timing.workingLivenessInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.pruneDeadWorkingSessions() }
+        }
+        RunLoop.main.add(liveness, forMode: .common)
+        workingLivenessTimer = liveness
     }
 
     deinit {
         if let obs = toggleObserver { NotificationCenter.default.removeObserver(obs) }
+        workingLivenessTimer?.invalidate()
         passiveAuthTask?.cancel()
         timer?.invalidate()
         accessibilityCheckTimer?.invalidate()
@@ -325,6 +335,11 @@ class LockController: ObservableObject {
         systemLockSeenDuringLock = false
         WebhookRelayController.shared.lockSessionBegan()
         pingGate.reset()
+        // Agents already mid-turn get their rows straight away.
+        _ = workingSessions.prune(isAlive: Self.processIsAlive)
+        var seeded = AgentPingQueue()
+        workingSessions.all.forEach { seeded.record($0) }
+        agentPings = seeded
         transitionTo(.locked)
         LidSleepController.shared.lockBegan()
     }
@@ -418,6 +433,16 @@ class LockController: ObservableObject {
     /// records every ping, so two agents finishing together both get a row; only the
     /// glow, the notification and the relay go through `PingGate`.
     private func handlePing(_ ping: AgentPing) {
+        workingSessions.note(ping)
+        // A turn starting or a session closing is bookkeeping: update the rows, never announce.
+        guard ping.kind.isNews else {
+            guard state == .locked else { return }
+            var queue = agentPings
+            queue.record(ping)
+            if queue != agentPings { agentPings = queue }
+            scheduleSleepIfAllDone()
+            return
+        }
         let soundEnabled = UserDefaults.standard.bool(forKey: Constants.agentPingSoundKey)
         let decision = PingDecision.make(state: state, soundEnabled: soundEnabled)
         var queue = agentPings
@@ -425,6 +450,7 @@ class LockController: ObservableObject {
         // Publish only a real change: a repeat in the same state leaves the queue as it
         // was, and an empty publish would still re-render the lock screen mid-breath.
         if queue != agentPings { agentPings = queue }
+        scheduleSleepIfAllDone()
         guard announce else { return }
         if decision.shouldPulse {
             pingPulse &+= 1
@@ -434,23 +460,46 @@ class LockController: ObservableObject {
             AgentNotifier.shared.notify(body: ping.summary() + ".", withSound: decision.withSound)
             WebhookRelayController.shared.relay(ping)
         }
-        if InputBlockPolicy.sleepsAfterPing(
-            kind: ping.kind, state: state,
-            settingEnabled: UserDefaults.standard.bool(forKey: Constants.sleepWhenAgentFinishesKey)
-        ), sleepAfterFinishTask == nil {
-            scheduleSleepAfterFinish()
-        }
+    }
+
+    /// `kill(pid, 0)`: EPERM still means the process exists.
+    private static func processIsAlive(_ pid: Int32) -> Bool {
+        kill(pid, 0) == 0 || errno == EPERM
+    }
+
+    /// Drops sessions whose agent process is gone (killed, terminal closed) — Claude sends
+    /// no `Stop` or `SessionEnd` then — and their working rows on the lock screen.
+    private func pruneDeadWorkingSessions() {
+        let dead = workingSessions.prune(isAlive: Self.processIsAlive)
+        guard !dead.isEmpty, state == .locked else { return }
+        var queue = agentPings
+        queue.removeWorking(ids: dead)
+        if queue != agentPings { agentPings = queue }
+        scheduleSleepIfAllDone()
+    }
+
+    private var sleepsNow: Bool {
+        InputBlockPolicy.sleepsNow(
+            state: state,
+            settingEnabled: UserDefaults.standard.bool(forKey: Constants.sleepWhenAgentFinishesKey),
+            statuses: agentPings.pings.map(\.kind.status)
+        )
+    }
+
+    private func scheduleSleepIfAllDone() {
+        if sleepsNow, sleepAfterFinishTask == nil { scheduleSleepAfterFinish() }
     }
 
     /// Lock macOS first, and only once the window server confirms it take Lockpaw's cover
     /// down (its sleep assertion goes with it), then sleep. If macOS didn't lock, Lockpaw
     /// stays up — the Mac is never left open — and is asked to sleep anyway.
     private func scheduleSleepAfterFinish() {
-        logger.notice("Agent finished — locking macOS and sleeping in a moment (setting on)")
+        logger.notice("Every agent finished — locking macOS and sleeping in a moment (setting on)")
         sleepAfterFinishTask = Task { @MainActor [weak self] in
             defer { self?.sleepAfterFinishTask = nil }
             try? await Task.sleep(nanoseconds: Constants.Timing.sleepAfterFinishDelayNs)
-            guard let self, !Task.isCancelled, self.state == .locked else { return }
+            // Re-checked: another agent may have started a turn or asked for something meanwhile.
+            guard let self, !Task.isCancelled, self.sleepsNow else { return }
             SystemSession.lockScreen()
             try? await Task.sleep(nanoseconds: Constants.Timing.systemLockConfirmDelayNs)
             guard self.state == .locked else { return }
@@ -567,8 +616,9 @@ class LockController: ObservableObject {
         // An unlock after an agent ping is Lockpaw having done its job: the one moment the
         // support ask may come up (the card or the menu, never here). The card only when
         // every agent finished; one waiting on a permission prompt is not a breakpoint.
-        if !agentPings.isEmpty {
-            let allFinished = agentPings.pings.allSatisfy { $0.kind.status == .done }
+        let news = agentPings.pings.filter { $0.kind.isNews }
+        if !news.isEmpty {
+            let allFinished = news.allSatisfy { $0.kind.status == .done }
             SupportAskController.shared.noteUnlockAfterPing(allFinished: allFinished)
         }
         presentationController.stop()

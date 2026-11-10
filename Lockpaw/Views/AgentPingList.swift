@@ -12,18 +12,19 @@ struct AgentPingList: View {
     let breathe: CGFloat
 
     @AppStorage(Constants.lockScreenShowsProjectsKey) private var showsProjects = false
+    @AppStorage(Constants.showWorkingAgentsKey) private var showsWorking = true
 
     static let maxRows = 3
 
     var body: some View {
         VStack(spacing: 8) {
             Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
-                ForEach(queue.rows.prefix(Self.maxRows)) { ping in
+                ForEach(rows.prefix(Self.maxRows)) { ping in
                     row(ping)
                 }
             }
-            if queue.pings.count > Self.maxRows {
-                Text("and \(queue.pings.count - Self.maxRows) more")
+            if rows.count > Self.maxRows {
+                Text("and \(rows.count - Self.maxRows) more")
                     .font(.lockCaption)
                     .foregroundStyle(.white.opacity(0.25))
                     .tracking(0.5)
@@ -31,6 +32,8 @@ struct AgentPingList: View {
         }
         .allowsHitTesting(false)
     }
+
+    private var rows: [AgentPing] { queue.rows(includingWorking: showsWorking) }
 
     /// The state lives in the dot, so VoiceOver gets the words the row leaves out.
     private func row(_ ping: AgentPing) -> some View {
@@ -82,6 +85,7 @@ extension AgentPingStatus {
         case .done, .attention: return Color("LockpawTeal")
         case .waiting: return Color("LockpawAmber")
         case .error: return Color("LockpawError")
+        case .working: return .white.opacity(0.5)
         }
     }
 }

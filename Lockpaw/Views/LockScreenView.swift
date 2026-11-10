@@ -26,6 +26,7 @@ struct LockScreenView: View {
     @State private var shakeOffset: CGFloat = 0
     @State private var successScale: CGFloat = 1.0
     @State private var pingGlow: CGFloat = 0
+    @AppStorage(Constants.showWorkingAgentsKey) private var showsWorkingAgents = true
     @AppStorage(GlowIntensity.storageKey) private var glowIntensityRaw = GlowIntensity.defaultValue.rawValue
     private var glowIntensity: GlowIntensity { GlowIntensity.resolved(from: glowIntensityRaw) }
     @State private var pingGlowGeneration = 0
@@ -151,7 +152,7 @@ struct LockScreenView: View {
                         // macOS 26. The animations are scoped to the list so a ping never
                         // opens an animated transaction over the breathing mascot.
                         AgentPingList(queue: controller.agentPings, breathe: breathe)
-                            .opacity(controller.agentPings.isEmpty || controller.unlockSucceeded ? 0 : 1)
+                            .opacity(controller.agentPings.rows(includingWorking: showsWorkingAgents).isEmpty || controller.unlockSucceeded ? 0 : 1)
                             .opacity(appeared ? 1 : 0)
                             .opacity(controller.isAuthenticating ? 0.15 : 1)
                             .animation(Constants.Anim.gentle, value: controller.agentPings)
@@ -237,7 +238,7 @@ struct LockScreenView: View {
         .onAppear {
             // Fade-to-black reveals remount this view with fresh @State — restore the
             // resting glow after a ping (onChange(of: pingPulse) won't refire on mount).
-            if !controller.agentPings.isEmpty { pingGlow = glowIntensity.restLevel }
+            if controller.agentPings.hasNews { pingGlow = glowIntensity.restLevel }
             withAnimation(reduceMotion ? .none : .timingCurve(0.16, 1, 0.3, 1, duration: 0.6)) { appeared = true }
             guard !reduceMotion else { return }
             withAnimation(Constants.Anim.breathe) { phase = Constants.Anim.breathePhaseTarget }

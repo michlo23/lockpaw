@@ -80,8 +80,31 @@ func readHookPayload(deadline seconds: TimeInterval = 2, limit: Int = 4 << 20) -
     return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
 }
 
+/// The agent process this hook belongs to: the first parent that isn't a shell. Claude
+/// Code runs hooks through a shell; Codex `notify` runs `lockpaw` directly. The app watches
+/// this pid to drop a working row when the agent is killed without a `Stop`.
+func agentProcessID() -> Int32? {
+    let shells: Set<String> = ["sh", "bash", "zsh", "dash", "fish", "env"]
+    var pid = getppid()
+    for _ in 0..<4 {
+        guard pid > 1 else { return nil }
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let name = withUnsafeBytes(of: info.kp_proc.p_comm) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        if !shells.contains(name) { return pid }
+        pid = info.kp_eproc.e_ppid
+    }
+    return nil
+}
+
 func sendPing(arguments: [String], printOnly: Bool, readsStdin: Bool = true) {
-    let info = AgentPing.userInfo(arguments: arguments, stdinPayload: readsStdin ? readHookPayload() : [:])
+    let info = AgentPing.userInfo(
+        arguments: arguments,
+        stdinPayload: readsStdin ? readHookPayload() : [:],
+        agentPID: agentProcessID()
+    )
 
     if printOnly {
         for key in info.keys.sorted() { print("\(key): \(info[key] ?? "")") }
@@ -253,8 +276,9 @@ func claudeStyleSnippet(path: String, events: [String], command: String, matcher
 /// (or the Settings button). Someone else's value is never overwritten.
 func installClaudeHook(printOnly: Bool, presence: Bool) {
     let url = claudeConfigDirectory().appendingPathComponent("settings.json")
-    // StopFailure runs instead of Stop when a turn ends on an API error.
-    let events = ["Notification", "Stop", "StopFailure"]
+    // StopFailure runs instead of Stop when a turn ends on an API error. UserPromptSubmit
+    // and SessionEnd mark a session working and closed; neither is ever announced.
+    let events = ["Notification", "Stop", "StopFailure", "UserPromptSubmit", "SessionEnd"]
     let command = shellPingCommand(agent: "claude")
     let matchers = ["Notification": AgentHookConfig.claudeNotificationMatcher]
     let markerPath = ClaudePresence.markerURL.path

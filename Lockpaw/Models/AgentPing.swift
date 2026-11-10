@@ -12,6 +12,13 @@ struct AgentPing: Equatable, Identifiable {
         case failed
         /// A bare ping with no payload, or an event this build does not recognise.
         case attention
+        /// A turn started (Claude's `UserPromptSubmit`). Tracked, never announced.
+        case working
+        /// The session closed (Claude's `SessionEnd`). Drops its row; never announced.
+        case ended
+
+        /// Bookkeeping, not news: no glow, notification or relay.
+        var isNews: Bool { self != .working && self != .ended }
 
         var verb: String {
             switch self {
@@ -21,6 +28,8 @@ struct AgentPing: Equatable, Identifiable {
             case .rateLimited: return "hit a rate limit"
             case .failed: return "stopped on an error"
             case .attention: return "needs you"
+            case .working: return "is working"
+            case .ended: return "ended"
             }
         }
     }
@@ -39,6 +48,9 @@ struct AgentPing: Equatable, Identifiable {
         static let notificationType = "notification_type"
         static let error = "error"
         static let sessionID = "session_id"
+        /// The agent's own process, found by the CLI from its parents, so the app can
+        /// drop a working row once that process is gone (killed, terminal closed).
+        static let pid = "pid"
         /// Read for robustness only; the CLI sends `project` instead.
         static let legacyCwd = "cwd"
 
@@ -59,6 +71,7 @@ struct AgentPing: Equatable, Identifiable {
     let kind: Kind
     let sessionID: String?
     let receivedAt: Date
+    var pid: Int32? = nil
 
     /// One row per session on the lock screen, keyed by agent and session like `PingGate`,
     /// so two agents that happen to share a session id never overwrite each other's row.
@@ -101,7 +114,8 @@ struct AgentPing: Equatable, Identifiable {
                 error: field(Key.error)
             ),
             sessionID: field(Key.sessionID),
-            receivedAt: now
+            receivedAt: now,
+            pid: field(Key.pid).flatMap { Int32($0) }.flatMap { $0 > 1 ? $0 : nil }
         )
     }
 
@@ -113,8 +127,9 @@ struct AgentPing: Equatable, Identifiable {
     /// Codex `notify` runs the program argv-style with stdin at /dev/null and appends its
     /// JSON payload as the last argument (`type`, `thread-id`, `cwd`, plus message fields
     /// that are never read here), so argv is checked for that shape too.
-    static func userInfo(arguments: [String], stdinPayload: [String: Any]) -> [String: String] {
+    static func userInfo(arguments: [String], stdinPayload: [String: Any], agentPID: Int32? = nil) -> [String: String] {
         var info: [String: String] = [:]
+        if let agentPID { info[Key.pid] = String(agentPID) }
         if let agent = value(after: "--agent", in: arguments), !agent.isEmpty { info[Key.agent] = agent }
 
         var payload = stdinPayload
@@ -168,6 +183,10 @@ struct AgentPing: Equatable, Identifiable {
             return error == "rate_limit" ? .rateLimited : .failed
         case "PermissionRequest":
             return .permission
+        case "UserPromptSubmit":
+            return .working
+        case "SessionEnd":
+            return .ended
         case "Notification":
             switch notificationType {
             case "permission_prompt", "ToolPermission": return .permission

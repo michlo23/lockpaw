@@ -22,12 +22,18 @@ final class InputBlockPolicyTests: XCTestCase {
         XCTAssertTrue(InputBlockPolicy.hotkeyPressToggles(now: t.addingTimeInterval(0.8), lastPress: t))
     }
 
-    func testSleepsOnlyWhenAFinishedAgentPingsALockedScreenWithTheSettingOn() {
-        XCTAssertTrue(InputBlockPolicy.sleepsAfterPing(kind: .finished, state: .locked, settingEnabled: true))
-        XCTAssertFalse(InputBlockPolicy.sleepsAfterPing(kind: .finished, state: .locked, settingEnabled: false))
-        XCTAssertFalse(InputBlockPolicy.sleepsAfterPing(kind: .finished, state: .unlocked, settingEnabled: true))
-        for kind in [AgentPing.Kind.permission, .needsInput, .failed, .rateLimited, .attention] {
-            XCTAssertFalse(InputBlockPolicy.sleepsAfterPing(kind: kind, state: .locked, settingEnabled: true), "\(kind)")
+    func testSleepsOnlyOnceEveryAgentIsDoneOnALockedScreenWithTheSettingOn() {
+        let sleeps = { (statuses: [AgentPingStatus], state: LockState, on: Bool) in
+            InputBlockPolicy.sleepsNow(state: state, settingEnabled: on, statuses: statuses)
         }
+        XCTAssertTrue(sleeps([.done], .locked, true))
+        XCTAssertTrue(sleeps([.done, .error], .locked, true))
+        XCTAssertFalse(sleeps([.done], .locked, false))
+        XCTAssertFalse(sleeps([.done], .unlocked, true))
+        XCTAssertFalse(sleeps([.done, .working], .locked, true), "another agent still working")
+        XCTAssertFalse(sleeps([.done, .waiting], .locked, true), "another agent waiting on the user")
+        XCTAssertFalse(sleeps([.working], .locked, true))
+        XCTAssertFalse(sleeps([.error], .locked, true))
+        XCTAssertFalse(sleeps([], .locked, true))
     }
 }

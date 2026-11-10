@@ -144,7 +144,7 @@ final class AgentPingQueueTests: XCTestCase {
         queue.record(ping(.failed, session: "c", at: 2))
         queue.record(ping(.finished, session: "d", at: 3))
 
-        XCTAssertEqual(queue.rows.map(\.sessionID), ["c", "a", "d", "b"])
+        XCTAssertEqual(queue.rows().map(\.sessionID), ["c", "a", "d", "b"])
     }
 
     func testRowNameSaysWhoNotWhat_projectOnlyWhenAsked() {

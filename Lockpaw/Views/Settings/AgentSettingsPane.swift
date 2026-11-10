@@ -7,6 +7,7 @@ struct AgentSettingsPane: View {
     @AppStorage(Constants.agentPingSoundKey) private var pingSound = false
     @AppStorage(Constants.lockScreenShowsProjectsKey) private var showsProjects = false
     @AppStorage(Constants.sleepWhenAgentFinishesKey) private var sleepWhenFinished = false
+    @AppStorage(Constants.showWorkingAgentsKey) private var showsWorking = true
 
     @State private var statuses: [String: AgentConnection.Status] = [:]
     @State private var presenceConfigured = false
@@ -89,8 +90,12 @@ struct AgentSettingsPane: View {
                     SettingLabel("Show project names on the lock screen", detail: "\u{201C}Claude Code \u{00B7} web-app\u{201D} instead of \u{201C}Claude Code\u{201D}.")
                 }
 
+                Toggle(isOn: $showsWorking) {
+                    SettingLabel("Show agents that are working", detail: "Claude Code sessions mid-turn get a row too. Needs the Claude hook set up again.")
+                }
+
                 Toggle(isOn: $sleepWhenFinished) {
-                    SettingLabel("Sleep when an agent finishes", detail: "While locked: locks macOS, closes the cover and puts the Mac to sleep.")
+                    SettingLabel("Sleep when an agent finishes", detail: "Once every agent is done while locked: locks macOS, closes the cover, puts the Mac to sleep.")
                 }
 
                 LabeledContent("Try it") {
