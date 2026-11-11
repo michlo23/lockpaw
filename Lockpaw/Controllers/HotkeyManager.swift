@@ -15,7 +15,18 @@ class HotkeyManager {
     private var tapRunLoop: CFRunLoop?
     private(set) var isRegistered = false
     private var carbonHotKey: EventHotKeyRef?
+    private var carbonSleepHotKey: EventHotKeyRef?
     private var carbonHandler: EventHandlerRef?
+
+    /// Carbon ids: 1 = lock, 2 = lock & sleep when agents finish.
+    private static func postToggle(sleepOnFinish: Bool) {
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: .toggleLockpaw, object: nil,
+                userInfo: [HotkeyConfig.sleepOnFinishInfoKey: sleepOnFinish]
+            )
+        }
+    }
 
     /// The tap goes blind while any process holds Secure Input — and macOS's loginwindow
     /// can keep it on long after the lock screen or a password AutoFill closed, killing the
@@ -26,27 +37,38 @@ class HotkeyManager {
         guard carbonHotKey == nil else { return }
         if carbonHandler == nil {
             var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-            InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
-                DispatchQueue.main.async {
-                    NotificationCenter.default.post(name: .toggleLockpaw, object: nil)
-                }
+            InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
+                var hotKeyID = EventHotKeyID()
+                GetEventParameter(
+                    event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                    nil, MemoryLayout<EventHotKeyID>.size, nil, &hotKeyID
+                )
+                HotkeyManager.postToggle(sleepOnFinish: hotKeyID.id == 2)
                 return noErr
             }, 1, &spec, nil, &carbonHandler)
         }
-        let id = EventHotKeyID(signature: OSType(0x4C4B_5057), id: 1) // "LKPW"
-        let status = RegisterEventHotKey(
-            UInt32(HotkeyConfig.keyCode), UInt32(HotkeyConfig.modifiers), id,
-            GetApplicationEventTarget(), 0, &carbonHotKey
-        )
-        if status != noErr {
-            carbonHotKey = nil
-            logger.error("RegisterEventHotKey failed: \(status, privacy: .public)")
+        carbonHotKey = Self.registerCarbon(id: 1, modifiers: HotkeyConfig.modifiers)
+        if HotkeyConfig.sleepShortcutEnabled, let mods = HotkeyConfig.sleepModifiers() {
+            carbonSleepHotKey = Self.registerCarbon(id: 2, modifiers: mods)
         }
+    }
+
+    private static func registerCarbon(id: UInt32, modifiers: Int) -> EventHotKeyRef? {
+        var ref: EventHotKeyRef?
+        let status = RegisterEventHotKey(
+            UInt32(HotkeyConfig.keyCode), UInt32(modifiers),
+            EventHotKeyID(signature: OSType(0x4C4B_5057), id: id), // "LKPW"
+            GetApplicationEventTarget(), 0, &ref
+        )
+        if status != noErr { logger.error("RegisterEventHotKey \(id) failed: \(status, privacy: .public)") }
+        return status == noErr ? ref : nil
     }
 
     private func unregisterCarbonHotkey() {
         if let ref = carbonHotKey { UnregisterEventHotKey(ref) }
+        if let ref = carbonSleepHotKey { UnregisterEventHotKey(ref) }
         carbonHotKey = nil
+        carbonSleepHotKey = nil
     }
 
     func registerHotkey() {
@@ -86,24 +108,17 @@ class HotkeyManager {
                 let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
                 let flags = event.flags
 
-                let savedKeyCode = HotkeyConfig.keyCode
-                let savedMods = HotkeyConfig.modifiers
+                var mods = 0
+                if flags.contains(.maskCommand) { mods |= cmdKey }
+                if flags.contains(.maskShift) { mods |= shiftKey }
+                if flags.contains(.maskAlternate) { mods |= optionKey }
+                if flags.contains(.maskControl) { mods |= controlKey }
 
-                guard keyCode == savedKeyCode else { return Unmanaged.passUnretained(event) }
-
-                var matches = true
-                if savedMods & cmdKey != 0 { matches = matches && flags.contains(.maskCommand) }
-                if savedMods & shiftKey != 0 { matches = matches && flags.contains(.maskShift) }
-                if savedMods & optionKey != 0 { matches = matches && flags.contains(.maskAlternate) }
-                if savedMods & controlKey != 0 { matches = matches && flags.contains(.maskControl) }
-
-                if matches {
+                if let sleepOnFinish = HotkeyConfig.pressedShortcut(keyCode: keyCode, modifiers: mods) {
                     // A held key auto-repeats; only the first press toggles (InputBlockPolicy).
                     let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
                     if InputBlockPolicy.hotkeyShouldToggle(isAutorepeat: isRepeat) {
-                        DispatchQueue.main.async {
-                            NotificationCenter.default.post(name: .toggleLockpaw, object: nil)
-                        }
+                        HotkeyManager.postToggle(sleepOnFinish: sleepOnFinish)
                     }
                     // Swallow it. A .listenOnly tap cannot, so the hotkey's own key used to
                     // reach the frontmost app as well — locking from a terminal with

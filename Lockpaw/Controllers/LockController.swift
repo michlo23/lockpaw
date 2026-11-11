@@ -28,6 +28,9 @@ class LockController: ObservableObject {
     /// Every agent that pinged since the screen was locked, kept until unlock — after
     /// the glow pulses finish, the lock screen lists who is waiting and why.
     @Published private(set) var agentPings = AgentPingQueue()
+    /// This lock came from the lock & sleep shortcut: once every agent is done, macOS
+    /// locks and the Mac sleeps. Set per lock, so the plain shortcut never sleeps.
+    @Published private(set) var sleepsWhenAgentsFinish = false
 
     /// True while the armed-Touch-ID path is live for this lock session — deliberately not
     /// the precise in-flight state of one evaluation. The lock screen reads it for its
@@ -103,15 +106,16 @@ class LockController: ObservableObject {
     init() {
         toggleObserver = NotificationCenter.default.addObserver(
             forName: .toggleLockpaw, object: nil, queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] note in
             guard let self else { return }
+            let sleepOnFinish = note.userInfo?[HotkeyConfig.sleepOnFinishInfoKey] as? Bool ?? false
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let now = Date()
                 defer { self.lastHotkeyPress = now }
                 guard InputBlockPolicy.hotkeyPressToggles(now: now, lastPress: self.lastHotkeyPress) else { return }
                 if self.state == .unlocked {
-                    self.lock()
+                    self.lock(sleepWhenAgentsFinish: sleepOnFinish)
                 } else if self.state == .locked {
                     if HotkeyConfig.requiresAuthenticationToUnlock {
                         self.requestUnlock()
@@ -245,10 +249,11 @@ class LockController: ObservableObject {
 
     // MARK: - Public
 
-    func lock() {
+    func lock(sleepWhenAgentsFinish: Bool = false) {
         guard transitionTo(.locking) else { return }
         sleepAfterFinishTask?.cancel() // a sleep scheduled by the previous lock is stale
         sleepAfterFinishTask = nil
+        sleepsWhenAgentsFinish = sleepWhenAgentsFinish
         SupportAskController.shared.lockStarted()
         guard AccessibilityChecker.isEnabled else {
             AccessibilityChecker.promptIfNeeded()
@@ -481,7 +486,7 @@ class LockController: ObservableObject {
     private var sleepsNow: Bool {
         InputBlockPolicy.sleepsNow(
             state: state,
-            settingEnabled: UserDefaults.standard.bool(forKey: Constants.sleepWhenAgentFinishesKey),
+            settingEnabled: sleepsWhenAgentsFinish,
             statuses: agentPings.pings.map(\.kind.status)
         )
     }
@@ -494,7 +499,7 @@ class LockController: ObservableObject {
     /// down (its sleep assertion goes with it), then sleep. If macOS didn't lock, Lockpaw
     /// stays up — the Mac is never left open — and is asked to sleep anyway.
     private func scheduleSleepAfterFinish() {
-        logger.notice("Every agent finished — locking macOS and sleeping in a moment (setting on)")
+        logger.notice("Every agent finished — locking macOS and sleeping in a moment (lock & sleep)")
         sleepAfterFinishTask = Task { @MainActor [weak self] in
             defer { self?.sleepAfterFinishTask = nil }
             try? await Task.sleep(nanoseconds: Constants.Timing.sleepAfterFinishDelayNs)

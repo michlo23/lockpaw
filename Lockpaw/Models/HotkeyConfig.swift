@@ -54,7 +54,8 @@ struct HotkeyConfig {
         UserDefaults.standard.set(value, forKey: requireAuthenticationToUnlockKey)
     }
 
-    /// Same rule as the hotkey's event tap: the saved key, with every saved modifier held.
+    /// The saved key, with every saved modifier held — extras allowed, so both shortcuts
+    /// (lock, and lock & sleep) unlock.
     /// For key events that reach the app directly — the lock-screen password field turns
     /// on secure input, which hides them from the tap.
     static func matches(
@@ -69,6 +70,45 @@ struct HotkeyConfig {
         if savedModifiers & optionKey != 0, !flags.contains(.option) { return false }
         if savedModifiers & controlKey != 0, !flags.contains(.control) { return false }
         return true
+    }
+
+    // MARK: - Lock & sleep shortcut
+
+    /// The second shortcut locks too, then sleeps the Mac once every agent is done. It is
+    /// the main one plus a modifier — Shift, or the first of Option/Control it lacks — so
+    /// there is nothing extra to record or remember. Nil when the main one holds all four.
+    static func sleepModifiers(for main: Int = HotkeyConfig.modifiers) -> Int? {
+        [shiftKey, optionKey, controlKey, cmdKey].first { main & $0 == 0 }.map { main | $0 }
+    }
+
+    /// userInfo key on `.toggleLockpaw`: true when the lock & sleep shortcut was pressed.
+    static let sleepOnFinishInfoKey = "sleepOnFinish"
+
+    static var sleepShortcutEnabled: Bool {
+        UserDefaults.standard.bool(forKey: Constants.sleepWhenAgentFinishesKey)
+    }
+
+    static var sleepDisplay: String? {
+        guard let mods = sleepModifiers() else { return nil }
+        let added = mods & ~modifiers
+        let name = added == shiftKey ? "Shift" : added == optionKey ? "Opt" : added == controlKey ? "Ctrl" : "Cmd"
+        return "\(name)+\(display)"
+    }
+
+    /// Which shortcut a key press is, by exact modifiers so the two never both match:
+    /// false = lock, true = lock & sleep, nil = neither.
+    static func pressedShortcut(
+        keyCode: Int,
+        modifiers: Int,
+        savedKeyCode: Int = HotkeyConfig.keyCode,
+        savedModifiers: Int = HotkeyConfig.modifiers,
+        sleepEnabled: Bool = HotkeyConfig.sleepShortcutEnabled
+    ) -> Bool? {
+        guard keyCode == savedKeyCode else { return nil }
+        let mods = modifiers & (cmdKey | shiftKey | optionKey | controlKey)
+        if mods == savedModifiers { return false }
+        if sleepEnabled, mods == sleepModifiers(for: savedModifiers) { return true }
+        return nil
     }
 
     // MARK: - System Shortcut Conflict Detection

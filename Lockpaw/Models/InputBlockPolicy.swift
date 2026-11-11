@@ -29,7 +29,7 @@ enum InputBlockPolicy {
         return now.timeIntervalSince(lastPress) > window
     }
 
-    /// "Sleep when an agent finishes": while Lockpaw holds the screen, with the setting on,
+    /// Lock & sleep: while Lockpaw holds a lock started that way (`settingEnabled`),
     /// once an agent has finished and none is still working or waiting on the user.
     static func sleepsNow(state: LockState, settingEnabled: Bool, statuses: [AgentPingStatus]) -> Bool {
         settingEnabled && state == .locked && statuses.contains(.done)

@@ -7,6 +7,7 @@ struct AgentSettingsPane: View {
     @AppStorage(Constants.agentPingSoundKey) private var pingSound = false
     @AppStorage(Constants.lockScreenShowsProjectsKey) private var showsProjects = false
     @AppStorage(Constants.sleepWhenAgentFinishesKey) private var sleepWhenFinished = false
+    @AppStorage("hotkeyDisplay") private var hotkeyDisplay = HotkeyConfig.defaultDisplay // redraws the shortcut below
     @AppStorage(Constants.showWorkingAgentsKey) private var showsWorking = true
 
     @State private var statuses: [String: AgentConnection.Status] = [:]
@@ -95,7 +96,13 @@ struct AgentSettingsPane: View {
                 }
 
                 Toggle(isOn: $sleepWhenFinished) {
-                    SettingLabel("Sleep when an agent finishes", detail: "Once every agent is done while locked: locks macOS, closes the cover, puts the Mac to sleep.")
+                    SettingLabel(
+                        "Lock & sleep shortcut: \(HotkeyConfig.sleepDisplay ?? "unavailable")",
+                        detail: "\(hotkeyDisplay) locks and stays locked. This one locks too, and once every agent is done it locks macOS and puts the Mac to sleep. Also in the menu bar."
+                    )
+                }
+                .onChange(of: sleepWhenFinished) {
+                    NotificationCenter.default.post(name: .lockpawHotkeyPreferenceChanged, object: nil)
                 }
 
                 LabeledContent("Try it") {

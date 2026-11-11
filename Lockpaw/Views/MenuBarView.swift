@@ -13,6 +13,12 @@ struct MenuBarView: View {
                     Label("Lock Screen", systemImage: "lock.fill")
                 }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
+
+                Button {
+                    controller.lock(sleepWhenAgentsFinish: true)
+                } label: {
+                    Label("Lock & Sleep When Agents Finish", systemImage: "moon.zzz")
+                }
             } else {
                 Button {
                     controller.requestUnlock()

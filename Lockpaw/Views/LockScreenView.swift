@@ -146,6 +146,16 @@ struct LockScreenView: View {
                         .allowsHitTesting(false)
                         .legibleOverWallpaper(!drawsBackdrop)
 
+                        // Set for the whole lock before the overlay shows, so a plain `if`.
+                        if controller.sleepsWhenAgentsFinish {
+                            Label("Sleeps when agents finish", systemImage: "moon.zzz")
+                                .font(.lockMono)
+                                .foregroundStyle(.white.opacity(0.35))
+                                .opacity(appeared && !controller.unlockSucceeded ? 1 : 0)
+                                .allowsHitTesting(false)
+                                .legibleOverWallpaper(!drawsBackdrop)
+                        }
+
                         // Who is waiting — a row per session; stays until
                         // unlock. Always mounted (empty until the first ping) and faded by
                         // explicit opacity: removal transitions hard-cut in the overlay on

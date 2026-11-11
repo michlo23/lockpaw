@@ -89,7 +89,27 @@ final class HotkeyConfigTests: XCTestCase {
     }
 
     func testExtraModifiersStillMatchLikeTheTap() {
-        // The event tap only checks that saved modifiers are held; the monitor must agree.
+        // While locked, extras still match, so the lock & sleep shortcut unlocks too.
         XCTAssertTrue(HotkeyConfig.matches(keyCode: 37, modifierFlags: [.command, .shift, .option], savedKeyCode: 37, savedModifiers: cmdKey | shiftKey))
+    }
+
+    func testSleepShortcutAddsTheFirstMissingModifier() {
+        XCTAssertEqual(HotkeyConfig.sleepModifiers(for: controlKey | optionKey), controlKey | optionKey | shiftKey)
+        XCTAssertEqual(HotkeyConfig.sleepModifiers(for: cmdKey | shiftKey), cmdKey | shiftKey | optionKey)
+        XCTAssertNil(HotkeyConfig.sleepModifiers(for: cmdKey | shiftKey | optionKey | controlKey))
+    }
+
+    func testPressedShortcutMatchesExactModifiers() {
+        let main = controlKey | optionKey
+        let pressed = { (key: Int, mods: Int, sleepOn: Bool) in
+            HotkeyConfig.pressedShortcut(keyCode: key, modifiers: mods, savedKeyCode: 31, savedModifiers: main, sleepEnabled: sleepOn)
+        }
+        XCTAssertEqual(pressed(31, main, true), false, "plain lock")
+        XCTAssertEqual(pressed(31, main | shiftKey, true), true, "lock & sleep")
+        XCTAssertNil(pressed(31, main | shiftKey, false), "sleep shortcut off")
+        XCTAssertNil(pressed(31, main | cmdKey, true), "extra modifier is neither")
+        XCTAssertNil(pressed(31, controlKey, true))
+        XCTAssertNil(pressed(32, main, true))
+        XCTAssertEqual(pressed(31, main | 0x10000, true), false, "non-modifier bits ignored")
     }
 }
