@@ -7,6 +7,8 @@ import Carbon
 struct GeneralSettingsPane: View {
     @AppStorage("hotkeyEnabled") private var hotkeyEnabled = HotkeyConfig.defaultEnabled
     @AppStorage(HotkeyConfig.requireAuthenticationToUnlockKey) private var requiresAuthentication = HotkeyConfig.defaultRequireAuthenticationToUnlock
+    @AppStorage(Constants.sleepWhenAgentFinishesKey) private var sleepShortcut = false
+    @AppStorage("hotkeyDisplay") private var hotkeyDisplay = HotkeyConfig.defaultDisplay // redraws the sleep shortcut
     @AppStorage(Constants.lidClosedModeKey) private var lidClosedMode = false
     @AppStorage(Constants.unlockWithMacKey) private var unlockWithMac = false
     @AppStorage("launchAtLogin") private var launchAtLogin = false
@@ -34,6 +36,16 @@ struct GeneralSettingsPane: View {
 
                 if hotkeyEnabled {
                     LabeledContent("Shortcut") { HotkeyRecorder() }
+
+                    Toggle(isOn: $sleepShortcut) {
+                        SettingLabel(
+                            "Lock & sleep: \(HotkeyConfig.sleepDisplay ?? "unavailable")",
+                            detail: "Locks too, and once every agent is done it locks macOS and puts the Mac to sleep. \(hotkeyDisplay) alone never sleeps."
+                        )
+                    }
+                    .onChange(of: sleepShortcut) {
+                        NotificationCenter.default.post(name: .lockpawHotkeyPreferenceChanged, object: nil)
+                    }
 
                     Toggle(isOn: $requiresAuthentication) {
                         SettingLabel("Ask for Touch ID to unlock", detail: "The shortcut only unlocks after Touch ID or your password.")
